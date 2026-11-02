@@ -682,24 +682,24 @@ select.input option { background: var(--sheet); color: var(--ink); }
 .split-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--ink-soft); font: 13px var(--mono); }
 .link { padding: 4px 0; border: 0; background: none; color: var(--cover-default); font: 600 13.5px var(--sans); text-decoration: underline; text-underline-offset: 3px; }
 
+/* Figures grow from the right, like a calculator or a ledger's amount column. */
 .amount-box {
   display: flex;
   align-items: baseline;
-  justify-content: center;
-  gap: 6px;
-  max-width: 320px;
-  margin: 4px auto 0;
-  padding-bottom: 4px;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 0 2px 4px;
   border-bottom: 4px double var(--ink);
 }
-.amount-cur { color: var(--ink-soft); font: 500 26px var(--mono); }
+.amount-cur { flex: none; color: var(--ink-soft); font: 500 26px var(--mono); }
 .amount-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 0;
   background: none;
   color: var(--ink);
   font: 500 44px/1.15 var(--mono);
-  text-align: center;
+  text-align: right;
   outline: none;
   font-variant-numeric: tabular-nums;
 }
