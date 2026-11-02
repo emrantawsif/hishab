@@ -637,7 +637,7 @@ function sheetCharacter(personId = null) {
     <div class="field"><label for="ch-name">Name</label><input id="ch-name" class="input" maxlength="40" value="${esc(person.name)}" placeholder="Name" autocomplete="off"></div>
     <label class="check"><input type="checkbox" id="ch-me" ${store.db.myId === person.id ? 'checked' : ''}> This is me</label>
     <div class="field"><label for="ch-iban">IBAN</label>
-      <input id="ch-iban" class="input iban" value="${esc(formatIban(person.iban))}" placeholder="DE89 3704 0044 0532 0130 00" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <input id="ch-iban" class="input iban" value="${esc(formatIban(person.iban))}" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <small class="help" id="ch-iban-help">Optional. Shown to friends when they pay this person back.</small>
     </div>
     <div class="field"><label for="ch-holder">Account holder</label><input id="ch-holder" class="input" maxlength="70" value="${esc(person.holder || '')}" placeholder="Name on the bank account" autocomplete="off"></div>
