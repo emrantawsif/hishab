@@ -147,15 +147,20 @@ export function expenseShares(expense, code) {
   return Object.fromEntries(ids.map((id, i) => [id, parts[i]]));
 }
 
-// Splits every expense in a ledger at once, so odd cents don't pile up on
-// one person: €3.33 between 4 leaves 1 cent over, and that cent goes to
-// whoever has been rounded down the most so far. Everyone ends up within a
-// cent of their exact share. Returns { expenseId: { memberId: minor } }.
+// A random-looking number fixed by a string: the same on every phone.
+function draw(text) {
+  let hash = 2166136261;
+  for (const ch of text) hash = Math.imul(hash ^ ch.codePointAt(0), 16777619);
+  return hash >>> 0;
+}
+
+// Splits every expense in a ledger. €3.33 between 4 leaves 1 cent over; that
+// cent goes to someone picked at random for that bill. The pick is seeded by
+// the bill's id, so every phone picks the same person and it never changes.
+// Returns { expenseId: { memberId: minor } }.
 export function ledgerShares(party) {
-  const drift = {}; // per person: what they were charged minus their exact share, so far
   const result = {};
-  const expenses = live(party.expenses).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || (a.id < b.id ? -1 : 1));
-  for (const expense of expenses) {
+  for (const expense of live(party.expenses)) {
     const { mode, weights } = expense.split;
     const ids = Object.keys(weights).filter(id => weights[id] > 0).sort();
     if (mode === 'exact') {
@@ -168,14 +173,12 @@ export function ledgerShares(party) {
     const exact = ids.map(id => (units * (mode === 'equal' ? 1 : weights[id])) / weightSum);
     const parts = exact.map(value => Math.floor(value + 1e-9));
     let leftover = units - parts.reduce((sum, p) => sum + p, 0);
+    // Bigger leftovers first (uneven splits); among equals, the random draw decides.
     const order = ids
-      .map((id, i) => ({ i, remainder: exact[i] - parts[i], drift: drift[id] || 0 }))
-      .sort((a, b) => (Math.abs(b.remainder - a.remainder) > 1e-9 ? b.remainder - a.remainder : a.drift - b.drift || a.i - b.i));
+      .map((id, i) => ({ i, remainder: exact[i] - parts[i], luck: draw(`${expense.id}:${id}`) }))
+      .sort((a, b) => (Math.abs(b.remainder - a.remainder) > 1e-9 ? b.remainder - a.remainder : a.luck - b.luck));
     for (let k = 0; leftover > 0; k += 1, leftover -= 1) parts[order[k % order.length].i] += 1;
-    result[expense.id] = Object.fromEntries(ids.map((id, i) => {
-      drift[id] = (drift[id] || 0) + (parts[i] - exact[i]) * step;
-      return [id, parts[i] * step];
-    }));
+    result[expense.id] = Object.fromEntries(ids.map((id, i) => [id, parts[i] * step]));
   }
   return result;
 }
