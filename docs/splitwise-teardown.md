@@ -41,7 +41,7 @@ amounts match exactly, which saves a transfer in common cases.
 
 | Splitwise | Hishab |
 |---|---|
-| Accounts and servers | No accounts. Data lives on your phone; the share link *is* the sync |
+| Accounts and servers | No accounts. Each phone keeps its own copy; a free Firebase database keeps everyone in sync live |
 | Capped free tier and ads | Unlimited, free forever, hosted on GitHub Pages |
 | Store app | Installable web app (PWA) for Android and iOS, works offline |
 | Plain number field | Amount field is a calculator: type `45*2+10` |
@@ -61,6 +61,7 @@ wins. A deleted item stays as a marker (a "tombstone") so the deletion spreads
 too. Two friends can add expenses offline, swap links, and end up with the same
 ledger.
 
-Limits: there is no live push. People see each other's changes only when a link
-is shared. A free Firebase or Supabase backend could add real-time sync later if
-the group wants it.
+Live mode (added later) uses the same merge with a free Firebase Realtime
+Database in the middle: the open ledger streams changes over Server-Sent
+Events, and each phone pushes only the items it has that are newer than the
+server's copy. The full-ledger link above still works as a fallback.

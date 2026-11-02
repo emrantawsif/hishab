@@ -1,7 +1,7 @@
 // Offline support. App files come from the network when it's quick (so
 // updates arrive), otherwise from the cache, so the app opens offline.
 
-const CACHE = 'hishab-v4';
+const CACHE = 'hishab-v5';
 const FONT_CACHE = 'hishab-fonts';
 const NETWORK_TIMEOUT_MS = 3000;
 const SHELL = [
@@ -15,6 +15,7 @@ const SHELL = [
   './js/share.js',
   './js/util.js',
   './js/avatar.js',
+  './js/sync.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

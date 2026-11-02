@@ -15,8 +15,8 @@ iOS like a normal app, works offline, and costs nothing to host.
 - **PAID stamp**: marking a payment slams a rubber stamp onto the line
 - **Paid-back meter**: every ledger shows how much of its debt has been paid back, until it reads "Cleared"
 - **WhatsApp group**: post the ledger summary to your group in one tap, with aligned columns; after adding a bill, tap "Post to group"; remind anyone who owes
-- **Sync by link**: the whole ledger travels inside the share link. When a friend adds bills and sends the link back, open it and the changes merge
-- **Private**: data lives on your phone. The ledger in a link sits after the `#`, which browsers never send to a server
+- **Live ledgers**: share a short link once; after that every bill and payment shows up on everyone's phone within a second or two, with a green **Live** badge in the header. Entries added offline sync when the phone reconnects, and edits merge item by item (newest edit wins)
+- **Free backend**: live sync uses a Firebase Realtime Database on the free Spark plan (no card, so it can't bill). Phones keep their own copy too, so the app still opens and works offline. Clear `DB_URL` in `js/sync.js` and the app falls back to carrying the whole ledger inside the link
 - Dark and light themes, backup and restore to a file, undo for every delete, 13 currencies (defaults from your time zone)
 
 See [docs/splitwise-teardown.md](docs/splitwise-teardown.md) for the teardown of Splitwise that shaped these choices.
@@ -73,7 +73,35 @@ Then open <http://localhost:5500>. No build step, no npm, no dependencies.
 | `js/money.js` | Integer money math, calculator parser, largest-remainder splits, balances, settle plan |
 | `js/state.js` | localStorage, the crew, newest-edit-wins merge, input cleaning for links and backups |
 | `js/share.js` | Ledger ⇄ compressed link, WhatsApp messages |
+| `js/sync.js` | Live ledgers over the Firebase REST API: live stream for the open ledger, push and merge, offline retry |
 | `js/app.js` | Screens, 3D books, stamp, bottom sheets, routing, install prompt |
 | `sw.js` | Offline cache (network first, falls back to cache after 3 s) |
 
-After changing files, bump `CACHE` in `sw.js` (for example `hishab-v5`) so installed apps drop old files.
+After changing files, bump `CACHE` in `sw.js` (for example `hishab-v6`) so installed apps drop old files.
+
+## Live sync setup (already done for this copy)
+
+1. Create a free Firebase project (Analytics off), then a **Realtime Database** in locked mode.
+2. Paste these rules in the database's **Rules** tab and publish:
+
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "ledgers": {
+      "$ledger": {
+        ".read": "$ledger.matches(/^[a-z0-9]{10,24}$/)",
+        ".write": "$ledger.matches(/^[a-z0-9]{10,24}$/)",
+        "$section": {
+          ".validate": "$section === 'meta' || $section === 'members' || $section === 'expenses' || $section === 'payments'"
+        }
+      }
+    }
+  }
+}
+```
+
+3. Put the database URL in `DB_URL` in `js/sync.js`.
+
+Anyone with a ledger's link can read and write that one ledger; nobody can list ledgers. Never upgrade the project to the Blaze plan, and it stays free.

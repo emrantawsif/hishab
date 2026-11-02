@@ -6,6 +6,7 @@ import { store, COVERS, initials, makeParty, nextStamp, mergeParty, sanitizePart
 import { INKS, PARTS, COLOR_PARTS, avatarSvg, avatarFromSeed, shuffleAvatar } from './avatar.js';
 import { CURRENCIES, currency, formatMoney, evaluateAmount, hasOperator, partyStats, settlePlan, expenseShares, ledgerShares } from './money.js';
 import { decodeParty, partyLink, extractJoinCode, summaryText, entryText, nudgeText } from './share.js';
+import { liveEnabled, liveLink, extractLiveId, fetchLedger, watch, unwatch, refreshAll, startSync, schedulePush, liveStatus, onStatus } from './sync.js';
 
 const app = $('#app');
 const sheetRoot = $('#sheet-root');
@@ -138,13 +139,19 @@ const openWhatsApp = text => window.open(`https://wa.me/?text=${encodeURICompone
 const linkCache = new Map();
 const linkKey = party => `${lastActivity(party)}:${Object.keys(party.expenses).length}:${Object.keys(party.payments).length}`;
 
+// With live sync on, a link is just the ledger's id: short, and always current.
 function warmLink(party) {
+  if (liveEnabled()) return;
   const key = linkKey(party);
   if (linkCache.get(party.id)?.key === key) return;
   partyLink(party).then(url => linkCache.set(party.id, { key, url }));
 }
 
 async function linkFor(party) {
+  if (liveEnabled()) {
+    schedulePush(party.id);
+    return liveLink(party.id);
+  }
   const cached = linkCache.get(party.id);
   if (cached?.key === linkKey(party)) return cached.url;
   const url = await partyLink(party);
@@ -153,10 +160,24 @@ async function linkFor(party) {
 }
 
 function withLink(party, send) {
+  if (liveEnabled()) {
+    schedulePush(party.id);
+    return send(liveLink(party.id));
+  }
   const cached = linkCache.get(party.id);
   if (cached?.key === linkKey(party)) send(cached.url);
   else linkFor(party).then(send);
 }
+
+const LIVE_LABELS = { live: 'Live', connecting: 'Connecting', offline: 'Offline', idle: 'Live', off: '' };
+const liveBadge = () => (liveEnabled() ? `<span class="live-badge" data-status="${liveStatus()}">${LIVE_LABELS[liveStatus()]}</span>` : '');
+
+onStatus(status => {
+  document.querySelectorAll('.live-badge').forEach(badge => {
+    badge.dataset.status = status;
+    badge.textContent = LIVE_LABELS[status];
+  });
+});
 
 // ---------- routing ----------
 
@@ -179,7 +200,13 @@ function render() {
   if (screen !== lastScreen) app.querySelector('main')?.classList.add('enter');
   lastScreen = screen;
   document.title = party ? `${party.name} · Hishab` : 'Hishab';
-  if (party) warmLink(party);
+  if (party) {
+    warmLink(party);
+    watch(party.id);
+  } else {
+    unwatch();
+    refreshAll();
+  }
 }
 
 // ---------- home: the shelf of ledgers ----------
@@ -295,7 +322,7 @@ function renderParty(party) {
   <header class="band" style="--cover:${coverColor(party)}">
     <div class="band-row">
       <button class="icon-btn" data-act="home" aria-label="All ledgers">${ICON.back}</button>
-      <div class="band-title">${esc(party.name)}</div>
+      <div class="band-title"><span class="band-name">${esc(party.name)}</span>${liveBadge()}</div>
       <div class="band-actions">
         <button class="icon-btn" data-act="share" aria-label="Share">${ICON.share}</button>
         <button class="icon-btn" data-act="party-settings" aria-label="Ledger settings">${ICON.gear}</button>
@@ -1027,7 +1054,9 @@ async function sheetShare(partyId) {
   const text = summaryText(party, stats, plan, link);
   openSheet(`
     <div class="sheet-head"><h2>Share this ledger</h2>${closeButton}</div>
-    <p class="muted">Friends open the link to see the ledger and add their own entries. When someone sends a link back, open it and the changes merge.</p>
+    <p class="muted">${liveEnabled()
+      ? 'This ledger is live. Anyone who opens the link joins it, and every new entry shows up on everyone’s phone within seconds.'
+      : 'Friends open the link to see the ledger and add their own entries. When someone sends a link back, open it and the changes merge.'}</p>
     <button class="btn wa block" id="sh-wa">${ICON.chat} Post summary to WhatsApp group</button>
     <div class="share-grid">
       ${navigator.share ? '<button class="btn" id="sh-native">Share…</button>' : ''}
@@ -1036,7 +1065,9 @@ async function sheetShare(partyId) {
       <button class="btn" id="sh-backup">Download backup</button>
     </div>
     <details class="preview"><summary>Preview the message</summary><pre>${esc(text)}</pre></details>
-    <small class="help">The ledger travels inside the link itself, so it never touches a server.</small>
+    <small class="help">${liveEnabled()
+      ? 'Stored in your group’s free Firebase database. Only people with the link can open it.'
+      : 'The ledger travels inside the link itself, so it never touches a server.'}</small>
   `, el => {
     $('#sh-wa', el).addEventListener('click', () => openWhatsApp(text));
     $('#sh-native', el)?.addEventListener('click', () => {
@@ -1163,7 +1194,7 @@ function sheetImport(incoming) {
   openSheet(`
     <div class="import">
       ${bookHtml(incoming, { interactive: false })}
-      <p class="muted">${members.length} people · ${stats.count} entries · ${money(incoming, stats.total)}</p>
+      <p class="muted">${members.length} people · ${stats.count} entr${stats.count === 1 ? 'y' : 'ies'} · ${money(incoming, stats.total)}</p>
     </div>
     <p class="center">${existing ? 'You already have this ledger. Their changes will be merged into yours; nothing is lost.' : 'Someone shared this ledger with you.'}</p>
     <button class="btn primary block" id="im-go">${existing ? 'Merge changes' : 'Add to my ledgers'}</button>
@@ -1198,12 +1229,25 @@ async function openJoinCode(code) {
   }
 }
 
+async function openLiveLedger(id) {
+  if (!liveEnabled()) return toast('Live ledgers aren’t switched on in this copy of Hishab.');
+  try {
+    const party = await fetchLedger(id);
+    if (party) sheetImport(party);
+    else toast('That ledger isn’t online yet. Ask whoever sent it to open Hishab with internet.');
+  } catch {
+    toast('Couldn’t reach the ledger. Check your internet and open the link again.');
+  }
+}
+
 async function handleJoinLink() {
-  const code = extractJoinCode(location.hash);
-  if (!code) return false;
+  const liveId = extractLiveId(location.hash);
+  const code = liveId ? null : extractJoinCode(location.hash);
+  if (!liveId && !code) return false;
   history.replaceState(null, '', location.pathname + location.search);
   render();
-  await openJoinCode(code);
+  if (liveId) await openLiveLedger(liveId);
+  else await openJoinCode(code);
   return true;
 }
 
@@ -1222,13 +1266,15 @@ function sheetPasteLink() {
       try { input.value = await navigator.clipboard.readText(); } catch { input.focus(); }
     });
     $('#pl-open', el).addEventListener('click', async () => {
+      const liveId = extractLiveId(input.value);
       const code = extractJoinCode(input.value);
-      if (!code) {
+      if (!liveId && !code) {
         $('#pl-error', el).textContent = 'That doesn’t look like a Hishab link.';
         return shake(input);
       }
       await closeSheet();
-      openJoinCode(code);
+      if (liveId) openLiveLedger(liveId);
+      else openJoinCode(code);
     });
   });
 }
@@ -1428,6 +1474,7 @@ store.subscribe(() => {
 applyTheme();
 render();
 handleJoinLink();
+startSync();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
