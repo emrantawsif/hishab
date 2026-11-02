@@ -41,25 +41,67 @@ export function extractJoinCode(text) {
   return match ? match[1] : null;
 }
 
-// WhatsApp messages. Text between ``` renders in monospace there, so the
-// settle-up lines form aligned ledger columns.
+// WhatsApp messages. Text between ``` renders in monospace there, so tables
+// line up as ledger columns. Phones fit about 30 monospace characters a line.
 
 const nameOf = (party, id) => party.members[id]?.name ?? 'Someone';
+const shortName = name => (name.length > 9 ? `${name.slice(0, 8)}…` : name);
 
+// Columns: left-aligned first, right-aligned figures after it.
+function table(rows) {
+  const widths = rows[0].map((_, col) => Math.max(...rows.map(row => row[col].length)));
+  return rows.map(row => row.map((cell, col) => (col === 0 ? cell.padEnd(widths[col]) : cell.padStart(widths[col]))).join(' ').trimEnd()).join('\n');
+}
+
+function dateRange(isoDates) {
+  if (!isoDates.length) return '';
+  const day = (iso, options) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', options);
+  };
+  const first = isoDates[0];
+  const last = isoDates[isoDates.length - 1];
+  if (first === last) return day(first, { day: 'numeric', month: 'short', year: 'numeric' });
+  const sameMonth = first.slice(0, 7) === last.slice(0, 7);
+  return sameMonth
+    ? `${day(first, { day: 'numeric' })}–${day(last, { day: 'numeric', month: 'short', year: 'numeric' })}`
+    : `${day(first, { day: 'numeric', month: 'short' })} – ${day(last, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+}
+
+// The ledger report posted to the group.
 export function summaryText(party, stats, plan, link) {
   const money = minor => formatMoney(minor, party.currency);
-  const people = live(party.members).length;
-  const perHead = money(Math.round(stats.total / Math.max(people, 1)));
-  const lines = [`*${party.name}*`, `Total ${money(stats.total)} · ${perHead} per head · ${people} people`, ''];
-  if (plan.length) {
-    const from = plan.map(t => nameOf(party, t.from));
-    const to = plan.map(t => nameOf(party, t.to));
-    const figures = plan.map(t => formatMoney(t.amount, party.currency, { symbol: false, fixed: true }));
-    const width = list => Math.max(...list.map(s => s.length));
-    const rows = plan.map((_, i) => `${from[i].padEnd(width(from))} → ${to[i].padEnd(width(to))}  ${figures[i].padStart(width(figures))}`);
-    lines.push(`Who pays whom (${currency(party.currency).symbol.trim()})`, '```' + rows.join('\n') + '```');
+  const figure = minor => formatMoney(minor, party.currency, { symbol: false, fixed: true });
+  const signed = minor => (minor > 0 ? '+' : minor < 0 ? '-' : '') + figure(Math.abs(minor));
+  const symbol = currency(party.currency).symbol.trim();
+  const people = live(party.members);
+  const bills = live(party.expenses);
+  const header = [dateRange(bills.map(e => e.date).sort()), `${people.length} people`, `${bills.length} bill${bills.length === 1 ? '' : 's'}`];
+  const lines = [`*${party.name}* · ledger report`, header.filter(Boolean).join(' · '), ''];
+
+  if (!bills.length) {
+    lines.push('No bills yet.');
   } else {
-    lines.push('Everyone is settled up.');
+    const biggest = [...bills].sort((a, b) => b.amount - a.amount)[0];
+    lines.push(
+      `Total spent: *${money(stats.total)}*`,
+      `Per head: *${money(Math.round(stats.total / Math.max(people.length, 1)))}*`,
+      `Biggest bill: ${biggest.title}, ${money(biggest.amount)}`,
+      '',
+      `*Everyone* (${symbol})`,
+      '```' + table([
+        ['', 'Paid', 'Share', 'Balance'],
+        ...people.map(m => [shortName(m.name), figure(stats.paid[m.id] || 0), figure(stats.consumed[m.id] || 0), signed(stats.net[m.id] || 0)]),
+      ]) + '```',
+    );
+    if (live(party.payments).length) lines.push('_Balance counts payments already made._');
+    lines.push('');
+    if (plan.length) {
+      lines.push(`*Who pays whom* (${symbol})`, '```' + table(plan.map(t => [`${shortName(nameOf(party, t.from))} → ${shortName(nameOf(party, t.to))}`, figure(t.amount)])) + '```');
+      if (stats.progress > 0) lines.push(`Paid back so far: ${money(stats.debt - stats.outstanding)} of ${money(stats.debt)} (${Math.round(stats.progress * 100)}%)`);
+    } else {
+      lines.push('*Everyone is settled up.*');
+    }
   }
   if (link) lines.push('', `Open the ledger: ${link}`);
   return lines.join('\n');

@@ -14,7 +14,7 @@ iOS like a normal app, works offline, and costs nothing to host.
 - **Fewest payments**: "who pays whom" with the smallest practical number of transfers
 - **PAID stamp**: marking a payment slams a rubber stamp onto the line
 - **Paid-back meter**: every ledger shows how much of its debt has been paid back, until it reads "Cleared"
-- **WhatsApp group**: post the ledger summary to your group in one tap, with aligned columns; after adding a bill, tap "Post to group"; remind anyone who owes
+- **WhatsApp group**: post a ledger report to your group in one tap: total, per head, biggest bill, what everyone paid and owes, who pays whom, and how much is paid back; after adding a bill, tap "Post to group"; remind anyone who owes
 - **Live ledgers**: share a short link once; after that every bill and payment shows up on everyone's phone within a second or two, with a green **Live** badge in the header. Entries added offline sync when the phone reconnects, and edits merge item by item (newest edit wins)
 - **Free backend**: live sync uses a Firebase Realtime Database on the free Spark plan (no card, so it can't bill). Phones keep their own copy too, so the app still opens and works offline. Clear `DB_URL` in `js/sync.js` and the app falls back to carrying the whole ledger inside the link
 - Dark and light themes, backup and restore to a file, undo for every delete, 13 currencies (defaults from your time zone)
