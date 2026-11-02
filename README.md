@@ -5,7 +5,14 @@ iOS like a normal app, works offline, and costs nothing to host.
 
 ## Features
 
-- **Your crew**: Tawsif, Tonmoy, Afraaz, Usama, Awais and Tabish are built in, and anyone new you add joins too. Each person is a character with a portrait you build (skin, hair, beard, glasses, hat, mood, ink colour) or shuffle. Pick "Choose your character" once so every ledger knows who "you" are. Characters travel inside share links, so the whole group sees the same faces
+- **Your crew**: Tawsif, Tonmoy, Afraaz, Usama, Awais and Tabish are built in, and anyone new you add joins too. Each person is a character with a portrait you build or shuffle: skin, 11 hairstyles, hair colour, eyes, eyebrows, beard, glasses, headwear (cap, beanie, topi, chef's hat, hijab, headband, crown), outfit (t-shirt, shirt, panjabi, hoodie, jacket), extras (earrings, headphones, fountain pen, blush), mood and ink colour. Pick "Choose your character" once so every ledger knows who "you" are. Characters travel with shared ledgers, so the whole group sees the same faces
+- **IBAN per character**: add an IBAN and account holder (checked for typos with the mod-97 test). Settle up gets a **Pay** sheet with copy buttons, and reminders and group reports include where to send the money
+- **Quick-add**: one-tap chips for rice, masala, chicken, beef, mutton, lemon/lime, potato, oil, green chilli, drinks/cola, yoghurt and groceries, each showing the last price you paid and filling it in
+- **Handwritten entries and sounds**: each bill is written in the payer's ink in a handwriting font; a stamp thump, pen scratch and page flip play as you go. Both can be switched off in the menu
+- **Recently deleted**: deleted bills, payments and people can be restored for everyone
+- **Joined late?** Adding someone to a ledger asks which earlier bills they were part of
+- **Update banner**: when a new version is published, the app offers a refresh instead of quietly running old code
+- **First-time tips** and iPhone splash screens
 - **Ledgers**: one ledger per occasion, drawn as a cloth-bound book on your shelf. Books tilt under your finger and the cover swings open when you tap one
 - **Ledger pages**: dates in the margin, a "Particulars" column, double-ruled totals, and each friend's initials in their own ink colour
 - **Two ways to split**: equally between whoever was there, or exact amounts per person
@@ -73,16 +80,17 @@ Then open <http://localhost:5500>. No build step, no npm, no dependencies.
 | `js/money.js` | Integer money math, calculator parser, largest-remainder splits, balances, settle plan |
 | `js/state.js` | localStorage, the crew, newest-edit-wins merge, input cleaning for links and backups |
 | `js/share.js` | Ledger ⇄ compressed link, WhatsApp messages |
+| `js/sound.js` | Stamp, pen and page sounds made with the Web Audio API (no audio files) |
 | `js/sync.js` | Live ledgers over the Firebase REST API: live stream for the open ledger, push and merge, offline retry |
 | `js/app.js` | Screens, 3D books, stamp, bottom sheets, routing, install prompt |
 | `sw.js` | Offline cache (network first, falls back to cache after 3 s) |
 
-After changing files, bump `CACHE` in `sw.js` (for example `hishab-v6`) so installed apps drop old files.
+After changing files, bump `CACHE` in `sw.js` (for example `hishab-v12`) so installed apps drop old files.
 
 ## Live sync setup (already done for this copy)
 
 1. Create a free Firebase project (Analytics off), then a **Realtime Database** in locked mode.
-2. Paste these rules in the database's **Rules** tab and publish:
+2. Paste these rules in the database's **Rules** tab and publish. Besides locking each ledger to its link, they cap the size of names, IBANs and amounts and refuse unknown data:
 
 ```json
 {
@@ -93,9 +101,34 @@ After changing files, bump `CACHE` in `sw.js` (for example `hishab-v6`) so insta
       "$ledger": {
         ".read": "$ledger.matches(/^[a-z0-9]{10,24}$/)",
         ".write": "$ledger.matches(/^[a-z0-9]{10,24}$/)",
-        "$section": {
-          ".validate": "$section === 'meta' || $section === 'members' || $section === 'expenses' || $section === 'payments'"
-        }
+        "meta": {
+          "name": { ".validate": "newData.isString() && newData.val().length <= 40" },
+          "currency": { ".validate": "newData.isString() && newData.val().length <= 3" },
+          "cover": { ".validate": "newData.isString() && newData.val().length <= 10" },
+          "at": { ".validate": "newData.isNumber()" }
+        },
+        "members": {
+          "$member": {
+            ".validate": "$member.matches(/^[a-z0-9-]{1,24}$/) && newData.hasChildren(['id', 'name', 'at'])",
+            "name": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "iban": { ".validate": "newData.isString() && newData.val().length <= 34" },
+            "holder": { ".validate": "newData.isString() && newData.val().length <= 70" }
+          }
+        },
+        "expenses": {
+          "$expense": {
+            ".validate": "$expense.matches(/^[a-z0-9]{1,24}$/) && newData.hasChildren(['id', 'amount', 'at'])",
+            "title": { ".validate": "newData.isString() && newData.val().length <= 60" },
+            "amount": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000" }
+          }
+        },
+        "payments": {
+          "$payment": {
+            ".validate": "$payment.matches(/^[a-z0-9]{1,24}$/) && newData.hasChildren(['id', 'amount', 'at'])",
+            "amount": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000" }
+          }
+        },
+        "$other": { ".validate": false }
       }
     }
   }

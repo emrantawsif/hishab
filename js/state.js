@@ -3,7 +3,7 @@
 
 import { INKS, avatarFromSeed, sanitizeAvatar } from './avatar.js';
 import { CURRENCIES, defaultCurrency } from './money.js';
-import { live, todayISO, uid } from './util.js';
+import { cleanIban, live, todayISO, uid } from './util.js';
 
 const STORAGE_KEY = 'hishab:v1';
 const listeners = new Set();
@@ -30,6 +30,7 @@ const seedCrew = () => Object.fromEntries(SEED_CREW.map(([name, avatar], i) => {
 const emptyDb = () => ({
   version: 1, parties: {}, me: {}, crew: seedCrew(), myId: null,
   theme: 'auto', lastCurrency: defaultCurrency(), installDismissed: false,
+  sound: true, handwriting: true, tipsSeen: false,
 });
 
 function load() {
@@ -94,9 +95,12 @@ export function makePerson(name) {
 
 // A ledger member is a copy of a crew person with the same id, so the same
 // friend is the same member in every ledger.
+// Bank details travel with the person, so friends can pay them back.
+const payDetails = person => ({ iban: person.iban || '', holder: person.holder || '' });
+
 export function memberFromPerson(person) {
   const now = Date.now();
-  return { id: person.id, name: person.name, avatar: person.avatar, color: INKS[person.avatar.ink], createdAt: now, at: now };
+  return { id: person.id, name: person.name, avatar: person.avatar, color: INKS[person.avatar.ink], ...payDetails(person), createdAt: now, at: now };
 }
 
 // Saving a character updates them everywhere they appear.
@@ -105,19 +109,21 @@ export function savePerson(target, person) {
   for (const party of Object.values(target.parties)) {
     const member = party.members[person.id];
     if (!member || member.deleted) continue;
-    Object.assign(member, { name: person.name, avatar: person.avatar, color: INKS[person.avatar.ink], at: nextStamp(member.at) });
+    Object.assign(member, { name: person.name, avatar: person.avatar, color: INKS[person.avatar.ink], ...payDetails(person), at: nextStamp(member.at) });
   }
 }
 
-// People in a ledger someone shared join your crew, and newer avatars win.
+// People in a ledger someone shared join your crew, and newer details win.
 export function adoptMembers(target, party) {
   const names = new Set(live(target.crew).map(p => p.name.toLowerCase()));
   for (const member of live(party.members)) {
     const person = target.crew[member.id];
     if (person) {
-      if ((member.at || 0) > (person.at || 0) && member.avatar) Object.assign(person, { name: member.name, avatar: member.avatar, at: member.at });
+      if ((member.at || 0) > (person.at || 0) && member.avatar) {
+        Object.assign(person, { name: member.name, avatar: member.avatar, ...payDetails(member), at: member.at });
+      }
     } else if (member.avatar && !names.has(member.name.toLowerCase())) {
-      target.crew[member.id] = { id: member.id, name: member.name, avatar: member.avatar, createdAt: Date.now(), at: member.at || 0 };
+      target.crew[member.id] = { id: member.id, name: member.name, avatar: member.avatar, ...payDetails(member), createdAt: Date.now(), at: member.at || 0 };
     }
   }
   if (target.myId && party.members[target.myId] && !target.me[party.id]) target.me[party.id] = target.myId;
@@ -232,6 +238,8 @@ export function sanitizeParty(raw) {
         name: text(m.name, 40) || 'Friend',
         color: avatar ? INKS[avatar.ink] : COLOR_RE.test(m.color) ? m.color : INKS[0],
         ...(avatar ? { avatar } : {}),
+        iban: cleanIban(m.iban),
+        holder: text(m.holder, 70),
         createdAt: int(m.createdAt),
         at: int(m.at),
         ...tombstone(m),

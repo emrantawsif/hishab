@@ -24,6 +24,7 @@
   --serif: 'Libre Caslon Text', Georgia, 'Times New Roman', serif;
   --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --hand: 'Kalam', 'Segoe Print', 'Bradley Hand', cursive;
   --gutter: 56px;
 }
 
@@ -990,3 +991,82 @@ select.input option { background: var(--sheet); color: var(--ink); }
   0% { box-shadow: 0 0 0 0 rgba(91, 224, 143, 0.7); }
   70%, 100% { box-shadow: 0 0 0 6px rgba(91, 224, 143, 0); }
 }
+
+/* ---------- handwritten entries ---------- */
+
+/* Each line is written in the ink of whoever paid it. */
+.hand .entry-title {
+  color: color-mix(in srgb, var(--c, var(--ink)) var(--ink-mix, 70%), var(--ink));
+  font: 400 19px/1.2 var(--hand);
+}
+.hand .entry.paid .entry-title { color: var(--ink-soft); }
+.hand .transfer-line > span:first-child { font: 400 18px/1.3 var(--hand); }
+.hand #ex-title { font: 400 21px var(--hand); }
+
+/* ---------- quick-add chips ---------- */
+
+.quick-row { display: flex; gap: 6px; margin: 10px -18px 0; padding: 2px 18px 6px; overflow-x: auto; scrollbar-width: none; }
+.quick-row::-webkit-scrollbar { display: none; }
+.quick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: none;
+  padding: 6px 11px;
+  border: 1.25px solid var(--rule-strong);
+  border-radius: 99px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 13.5px var(--sans);
+  white-space: nowrap;
+}
+.quick small { color: var(--ink-faint); font: 400 11.5px var(--mono); }
+.quick.on { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.quick.on small { color: var(--paper); opacity: 0.75; }
+
+/* ---------- IBAN and paying ---------- */
+
+.input.iban, .pay-row b.iban { font-family: var(--mono); letter-spacing: 0.02em; }
+.help.bad { color: var(--dr); }
+.pay-details { display: grid; margin-top: 12px; }
+.pay-row { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--rule); }
+.pay-row span { color: var(--ink-faint); font: 600 10.5px var(--sans); letter-spacing: 0.1em; text-transform: uppercase; }
+.pay-row b { font-weight: 500; overflow-wrap: anywhere; }
+
+/* ---------- restore and past bills ---------- */
+
+.split-row.off { opacity: 0.55; }
+.split-row .grow small { display: block; font-weight: 400; }
+.tick { width: 20px; height: 20px; flex: none; accent-color: var(--cover-default); }
+
+/* ---------- menu switches, tips, update banner ---------- */
+
+.menu-item.switch { display: flex; align-items: center; justify-content: space-between; }
+.menu-item.switch span { padding: 2px 10px; border-radius: 99px; background: var(--paper-2); color: var(--ink-soft); font: 600 12px var(--mono); }
+.menu-item.switch[aria-pressed='true'] span { background: var(--ink); color: var(--paper); }
+
+.steps.tips li { align-items: flex-start; }
+.steps.tips li > span { display: grid; gap: 2px; }
+.steps.tips small { color: var(--ink-soft); font-size: 13.5px; }
+
+.update-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 8px);
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 10px 10px 10px 16px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 12px 30px var(--shadow);
+  font-size: 14px;
+  font-weight: 500;
+  transform: translate(-50%, -140%);
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+.update-banner.show { transform: translate(-50%, 0); }

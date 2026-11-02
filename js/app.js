@@ -1,9 +1,10 @@
 // Hishab UI. Screens render to HTML strings; clicks route through data-act.
 // Bottom sheets live in #sheet-root so re-rendering the screen never resets a form.
 
-import { $, esc, live, uid, todayISO, prettyDate, haptic } from './util.js';
+import { $, esc, live, uid, todayISO, prettyDate, haptic, cleanIban, formatIban, ibanValid } from './util.js';
 import { store, COVERS, initials, makeParty, nextStamp, mergeParty, sanitizeParty, parseNames, memberInUse, lastActivity, crewList, makePerson, memberFromPerson, savePerson, adoptMembers } from './state.js';
 import { INKS, PARTS, COLOR_PARTS, avatarSvg, avatarFromSeed, shuffleAvatar } from './avatar.js';
+import { sound } from './sound.js';
 import { CURRENCIES, currency, formatMoney, evaluateAmount, hasOperator, partyStats, settlePlan, expenseShares, ledgerShares } from './money.js';
 import { decodeParty, partyLink, extractJoinCode, summaryText, entryText, nudgeText } from './share.js';
 import { liveEnabled, liveLink, extractLiveId, fetchLedger, watch, unwatch, refreshAll, startSync, schedulePush, liveStatus, onStatus } from './sync.js';
@@ -371,13 +372,15 @@ function renderEntries(party, stats) {
     ...live(party.expenses).map(item => ({ kind: 'expense', item })),
     ...live(party.payments).map(item => ({ kind: 'payment', item })),
   ].sort((a, b) => b.item.date.localeCompare(a.item.date) || b.item.createdAt - a.item.createdAt);
+  const deleted = ['expenses', 'payments', 'members'].reduce((count, key) => count + Object.values(party[key]).filter(item => item.deleted).length, 0);
+  const restoreLink = deleted ? `<button class="link-btn" data-act="deleted">Recently deleted (${deleted})</button>` : '';
 
   if (!items.length) {
     return `${ledgerHead(party)}<div class="blank">
       <p>No entries yet.</p>
       <p class="muted">Every bill you add goes on its own line here.</p>
       <button class="btn primary" data-act="add-expense">Add the first bill</button>
-    </div>`;
+    </div>${restoreLink}`;
   }
 
   const splits = ledgerShares(party);
@@ -386,7 +389,7 @@ function renderEntries(party, stats) {
     const date = item.date === lastDate ? '<span class="gutter date ditto" aria-hidden="true">〃</span>' : dateCell(item.date);
     lastDate = item.date;
     if (kind === 'payment') {
-      return `<button class="entry paid" data-act="payment" data-id="${esc(item.id)}">
+      return `<button class="entry paid" data-act="payment" data-id="${esc(item.id)}" style="--c:${esc(party.members[item.from]?.color || INKS[0])}">
         ${date}
         <span class="entry-main"><span class="entry-title">${esc(nameOf(party, item.from))} paid ${esc(objectName(party, item.to))}</span><small>Settlement</small></span>
         <span class="entry-amt">${figure(party, item.amount)}</span>
@@ -403,7 +406,7 @@ function renderEntries(party, stats) {
       if (delta > 0) mine = `<small class="cr">you lent ${figure(party, delta)}</small>`;
       else if (delta < 0) mine = `<small class="dr">you owe ${figure(party, -delta)}</small>`;
     }
-    return `<button class="entry" data-act="edit-expense" data-id="${esc(item.id)}">
+    return `<button class="entry" data-act="edit-expense" data-id="${esc(item.id)}" style="--c:${esc(party.members[payers[0]]?.color || INKS[0])}">
       ${date}
       <span class="entry-main"><span class="entry-title">${esc(item.title)}</span><small>${esc(payerText)} · split ${people} way${people === 1 ? '' : 's'}</small></span>
       <span class="entry-amt">${figure(party, item.amount)}${mine}</span>
@@ -411,7 +414,8 @@ function renderEntries(party, stats) {
   }).join('');
 
   return `${ledgerHead(party)}${rows}
-    <div class="ledger-total"><span class="gutter"></span><span>Total spent</span><b>${figure(party, stats.total)}</b></div>`;
+    <div class="ledger-total"><span class="gutter"></span><span>Total spent</span><b>${figure(party, stats.total)}</b></div>
+    ${restoreLink}`;
 }
 
 function renderBalances(party, stats) {
@@ -453,6 +457,7 @@ function renderSettle(party, stats, plan) {
         <div class="transfer-line"><span><b>${esc(nameOf(party, t.from))}</b> ${t.from === me ? 'pay' : 'pays'} <b>${esc(objectName(party, t.to))}</b></span><span class="leader"></span><b class="transfer-amt">${money(party, t.amount)}</b></div>
         <div class="transfer-actions">
           ${t.from !== me ? `<button class="btn sm wa" data-act="nudge" data-from="${esc(t.from)}" data-to="${esc(t.to)}" data-amount="${t.amount}">${ICON.chat} Remind</button>` : ''}
+          ${party.members[t.to]?.iban ? `<button class="btn sm" data-act="pay" data-from="${esc(t.from)}" data-to="${esc(t.to)}" data-amount="${t.amount}">${t.from === me ? 'Pay' : 'IBAN'}</button>` : ''}
           <button class="btn sm" data-act="mark-paid" data-from="${esc(t.from)}" data-to="${esc(t.to)}" data-amount="${t.amount}">Mark paid</button>
         </div>
       </div>
@@ -594,8 +599,12 @@ function sheetCharacter(personId = null) {
   const existing = personId ? store.db.crew[personId] : null;
   const person = existing ? structuredClone(existing) : makePerson('');
   let armed = false;
-  const labels = { skin: 'Skin', hair: 'Hair', hairColor: 'Hair colour', beard: 'Beard', glasses: 'Glasses', hat: 'Hat', mood: 'Mood', ink: 'Ink colour' };
-  const order = ['skin', 'hair', 'hairColor', 'beard', 'glasses', 'hat', 'mood', 'ink'];
+  const labels = {
+    skin: 'Skin', hair: 'Hair', hairColor: 'Hair colour', eyes: 'Eyes', brows: 'Eyebrows', beard: 'Beard',
+    glasses: 'Glasses', hat: 'Headwear', outfit: 'Outfit', extra: 'Extras', mood: 'Mood', ink: 'Ink colour',
+  };
+  const order = ['skin', 'hair', 'hairColor', 'eyes', 'brows', 'beard', 'glasses', 'hat', 'outfit', 'extra', 'mood', 'ink'];
+  const words = { tee: 't-shirt', collar: 'shirt', dots: 'classic', pen: 'pen' };
 
   const optionsHtml = key => {
     if (COLOR_PARTS[key]) {
@@ -603,7 +612,8 @@ function sheetCharacter(personId = null) {
     }
     return `<div class="tiles" data-part="${key}">${PARTS[key].map(value => {
       const preview = { ...person.avatar, [key]: value, ...(key === 'hair' ? { hat: 'none' } : {}) };
-      return `<button type="button" class="tile ${person.avatar[key] === value ? 'on' : ''}" data-value="${value}" aria-label="${labels[key]}: ${value}"><span class="ava fill">${avatarSvg(preview)}</span><small>${value}</small></button>`;
+      const word = words[value] || value;
+      return `<button type="button" class="tile ${person.avatar[key] === value ? 'on' : ''}" data-value="${value}" aria-label="${labels[key]}: ${word}"><span class="ava fill">${avatarSvg(preview)}</span><small>${word}</small></button>`;
     }).join('')}</div>`;
   };
 
@@ -626,6 +636,11 @@ function sheetCharacter(personId = null) {
     ${record()}
     <div class="field"><label for="ch-name">Name</label><input id="ch-name" class="input" maxlength="40" value="${esc(person.name)}" placeholder="Name" autocomplete="off"></div>
     <label class="check"><input type="checkbox" id="ch-me" ${store.db.myId === person.id ? 'checked' : ''}> This is me</label>
+    <div class="field"><label for="ch-iban">IBAN</label>
+      <input id="ch-iban" class="input iban" value="${esc(formatIban(person.iban))}" placeholder="DE89 3704 0044 0532 0130 00" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <small class="help" id="ch-iban-help">Optional. Shown to friends when they pay this person back.</small>
+    </div>
+    <div class="field"><label for="ch-holder">Account holder</label><input id="ch-holder" class="input" maxlength="70" value="${esc(person.holder || '')}" placeholder="Name on the bank account" autocomplete="off"></div>
     <div id="ch-parts">${order.map(key => `<div class="field"><label>${labels[key]}</label>${optionsHtml(key)}</div>`).join('')}</div>
     <p class="form-error" id="ch-error" aria-live="polite"></p>
     <div class="sheet-actions">
@@ -648,6 +663,15 @@ function sheetCharacter(personId = null) {
       haptic(8);
       paint();
     });
+    $('#ch-iban', el).addEventListener('input', event => {
+      const iban = cleanIban(event.target.value);
+      const help = $('#ch-iban-help', el);
+      const wrong = iban.length >= 15 && !ibanValid(iban);
+      help.classList.toggle('bad', wrong);
+      help.textContent = !iban ? 'Optional. Shown to friends when they pay this person back.'
+        : ibanValid(iban) ? 'Valid IBAN.'
+          : wrong ? 'This IBAN doesn’t add up. Check for a typo.' : 'Keep going…';
+    });
     $('#ch-shuffle', el).addEventListener('click', () => {
       person.avatar = shuffleAvatar();
       const face = $('#ch-face', el);
@@ -668,9 +692,15 @@ function sheetCharacter(personId = null) {
         $('#ch-error', el).textContent = `${clash.name} is already in your crew.`;
         return shake($('#ch-name', el));
       }
+      const iban = cleanIban($('#ch-iban', el).value);
+      if (iban && !ibanValid(iban)) {
+        $('#ch-error', el).textContent = 'That IBAN doesn’t add up. Check it, or leave it empty.';
+        return shake($('#ch-iban', el));
+      }
+      const holder = $('#ch-holder', el).value.trim().replace(/\s+/g, ' ').slice(0, 70);
       const isMe = $('#ch-me', el).checked;
       store.update(db => {
-        savePerson(db, { ...person, name, at: nextStamp(existing?.at) });
+        savePerson(db, { ...person, name, iban, holder, at: nextStamp(existing?.at) });
         if (isMe) db.myId = person.id;
         else if (db.myId === person.id) db.myId = null;
       });
@@ -695,6 +725,22 @@ function sheetCharacter(personId = null) {
   });
 }
 
+// What a biryani night is made of, one tap each.
+const QUICK_ITEMS = ['Rice', 'Masala', 'Chicken', 'Beef', 'Mutton', 'Lemon / lime', 'Potato', 'Oil', 'Green chilli', 'Drinks / cola', 'Yoghurt', 'Groceries'];
+
+// The most recent price paid for each bill name, across all ledgers in this currency.
+function lastPrices(code) {
+  const latest = {};
+  for (const party of Object.values(store.db.parties)) {
+    if (party.currency !== code) continue;
+    for (const expense of live(party.expenses)) {
+      const key = expense.title.trim().toLowerCase();
+      if (!latest[key] || latest[key].at < (expense.createdAt || 0)) latest[key] = { at: expense.createdAt || 0, amount: expense.amount };
+    }
+  }
+  return latest;
+}
+
 function sheetExpense(partyId, expenseId = null) {
   const party = store.party(partyId);
   const members = live(party.members);
@@ -705,6 +751,11 @@ function sheetExpense(partyId, expenseId = null) {
   const label = m => nameOf(party, m.id);
   const allIds = members.map(m => m.id);
   const toText = minor => (minor ? String(minor / 100) : '');
+  const prices = lastPrices(party.currency);
+  const quickHtml = () => QUICK_ITEMS.map(item => {
+    const last = prices[item.toLowerCase()];
+    return `<button type="button" class="quick ${draft.title === item ? 'on' : ''}" data-quick="${item}">${item}${last ? `<small>${figure(party, last.amount)}</small>` : ''}</button>`;
+  }).join('');
 
   const draft = {
     title: existing?.title ?? '',
@@ -802,6 +853,7 @@ function sheetExpense(partyId, expenseId = null) {
       <span class="calc-keys">${['+', '−', '×', '÷'].map(k => `<button type="button" class="calc-key" data-key="${k}" aria-label="Insert ${k}">${k}</button>`).join('')}</span>
     </div>
     <div class="field"><label for="ex-title">Particulars</label><input id="ex-title" class="input" maxlength="60" placeholder="Biryani, 2 kg" value="${esc(draft.title)}" autocomplete="off"></div>
+    <div class="quick-row" id="ex-quick">${quickHtml()}</div>
     <div class="field"><label>Paid by</label><div id="ex-payer">${payerHtml()}</div></div>
     <div class="field"><label>Split</label>
       <div class="seg" id="ex-mode">${[['equal', 'Equally'], ['exact', 'Exact amounts']].map(([id, text]) => `<button type="button" class="seg-btn ${draft.mode === id ? 'on' : ''}" data-mode="${id}">${text}</button>`).join('')}</div>
@@ -842,7 +894,10 @@ function sheetExpense(partyId, expenseId = null) {
     el.addEventListener('input', event => {
       const t = event.target;
       if (t === amountInput) draft.amountText = t.value;
-      else if (t.id === 'ex-title') draft.title = t.value;
+      else if (t.id === 'ex-title') {
+        draft.title = t.value;
+        find('#ex-quick').innerHTML = quickHtml();
+      }
       else if (t.id === 'ex-date') draft.date = t.value;
       else if (t.dataset.payamt) draft.payAmounts[t.dataset.payamt] = t.value;
       else if (t.dataset.exact) draft.exact[t.dataset.exact] = t.value;
@@ -866,6 +921,16 @@ function sheetExpense(partyId, expenseId = null) {
         amountInput.focus();
         amountInput.setSelectionRange(start + 1, start + 1);
         draft.amountText = amountInput.value;
+      } else if (dataset.quick) {
+        draft.title = dataset.quick;
+        find('#ex-title').value = draft.title;
+        const last = prices[draft.title.toLowerCase()];
+        if (last && !draft.amountText) {
+          draft.amountText = toText(last.amount);
+          amountInput.value = draft.amountText;
+        }
+        find('#ex-quick').innerHTML = quickHtml();
+        haptic(8);
       } else if (dataset.payer) {
         draft.payer = dataset.payer;
         find('#ex-payer').innerHTML = payerHtml();
@@ -917,6 +982,7 @@ function sheetExpense(partyId, expenseId = null) {
         };
       });
       haptic(15);
+      sound.pen();
       await closeSheet();
       if (existing) return toast('Entry updated');
       // Prepare the link now so "Post to group" can open WhatsApp straight from the tap.
@@ -994,6 +1060,8 @@ function sheetMembers(partyId) {
       });
       redraw();
       toast(`Added ${person.name}`);
+      const party = store.party(partyId);
+      if (live(party.expenses).some(e => !(e.split.weights[person.id] > 0))) sheetPastBills(partyId, person.id);
     };
 
     function addNew() {
@@ -1174,6 +1242,38 @@ function sheetRecordPayment(partyId) {
   });
 }
 
+// Everything needed for a bank transfer, each with its own copy button.
+function sheetPay(partyId, transfer) {
+  const party = store.party(partyId);
+  const payee = party.members[transfer.to];
+  const details = [
+    ['IBAN', formatIban(payee.iban), payee.iban],
+    ['Account holder', payee.holder || payee.name, payee.holder || payee.name],
+    ['Amount', money(party, transfer.amount), (transfer.amount / 100).toFixed(2)],
+    ['Reference', party.name, party.name],
+  ];
+  openSheet(`
+    <div class="sheet-head"><h2>Pay ${esc(payee.name)}</h2>${closeButton}</div>
+    <p class="muted">${esc(nameOf(party, transfer.from))} → ${esc(objectName(party, transfer.to))}. Copy these into your banking app.</p>
+    <div class="pay-details">${details.map(([label, shown], i) => `
+      <div class="pay-row"><span>${label}</span><b class="${i === 0 ? 'iban' : ''}">${esc(shown)}</b><button type="button" class="btn sm" data-copy="${i}">Copy</button></div>`).join('')}
+    </div>
+    <button class="btn primary block" id="pay-done">Paid, mark it</button>
+  `, el => {
+    el.querySelector('.pay-details').addEventListener('click', async event => {
+      const button = event.target.closest('[data-copy]');
+      if (!button) return;
+      const [label, , value] = details[Number(button.dataset.copy)];
+      toast((await copyText(value)) ? `${label} copied` : 'Couldn’t copy. Select it and copy by hand.');
+    });
+    $('#pay-done', el).addEventListener('click', async () => {
+      await closeSheet();
+      sound.stamp();
+      recordPayment(partyId, transfer.from, transfer.to, transfer.amount);
+    });
+  });
+}
+
 function recordPayment(partyId, from, to, amount) {
   const id = uid();
   const now = Date.now();
@@ -1217,6 +1317,7 @@ function sheetImport(incoming) {
       await closeSheet();
       location.hash = `/party/${incoming.id}`;
       toast(!existing ? 'Ledger added' : changed ? `Merged ${changed} change${changed === 1 ? '' : 's'}` : 'Already up to date');
+      maybeShowTips();
     });
   });
 }
@@ -1279,6 +1380,96 @@ function sheetPasteLink() {
   });
 }
 
+const TIPS = [
+  ['Choose your character', 'Tap yourself in Your crew. Tap anyone to change their look or add their IBAN.'],
+  ['One ledger per occasion', 'Tap New ledger and pick who’s in by tapping faces. It appears as a book on your shelf.'],
+  ['Add bills fast', 'Tap a quick-add item like Rice or Mutton, and type sums like 45*2 for the amount.'],
+  ['Share once, stay live', 'Post to WhatsApp group. Everyone who taps the link sees new bills within seconds.'],
+  ['Settle up', 'Hishab works out the fewest payments. Tap Pay for their IBAN, then Mark paid to stamp it.'],
+];
+
+function sheetTips() {
+  openSheet(`
+    <div class="sheet-head"><h2>Welcome to Hishab</h2>${closeButton}</div>
+    <ol class="steps tips">${TIPS.map(([title, text]) => `<li><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ol>
+    <button class="btn primary block" data-act="close-sheet">Got it</button>
+  `);
+  store.update(db => { db.tipsSeen = true; });
+}
+
+function maybeShowTips() {
+  if (store.db.tipsSeen) return;
+  setTimeout(() => { if (!sheet && !store.db.tipsSeen) sheetTips(); }, 900);
+}
+
+// Deleted entries are kept as tombstones for syncing, so they can come back.
+function sheetDeleted(partyId) {
+  const rows = () => {
+    const party = store.party(partyId);
+    const gone = [
+      ...Object.values(party.expenses).filter(e => e.deleted).map(e => ({ key: 'expenses', id: e.id, at: e.at, title: e.title, detail: money(party, e.amount) })),
+      ...Object.values(party.payments).filter(p => p.deleted).map(p => ({ key: 'payments', id: p.id, at: p.at, title: `${nameOf(party, p.from)} paid ${objectName(party, p.to)}`, detail: `Settlement · ${money(party, p.amount)}` })),
+      ...Object.values(party.members).filter(m => m.deleted).map(m => ({ key: 'members', id: m.id, at: m.at, title: m.name, detail: 'Removed from this ledger' })),
+    ].sort((a, b) => b.at - a.at);
+    if (!gone.length) return '<p class="muted">Nothing deleted.</p>';
+    return gone.map(g => `
+      <div class="split-row">
+        <span class="grow"><b>${esc(g.title)}</b><small class="muted">${esc(g.detail)} · deleted ${prettyDate(todayISO(new Date(g.at)))}</small></span>
+        <button type="button" class="btn sm" data-restore="${g.key}:${esc(g.id)}">Restore</button>
+      </div>`).join('');
+  };
+  openSheet(`
+    <div class="sheet-head"><h2>Recently deleted</h2>${closeButton}</div>
+    <div class="split-list" id="del-list">${rows()}</div>
+    <small class="help">Restoring brings it back for everyone in this ledger.</small>
+  `, el => {
+    $('#del-list', el).addEventListener('click', event => {
+      const button = event.target.closest('[data-restore]');
+      if (!button) return;
+      const [key, id] = button.dataset.restore.split(':');
+      setDeleted(partyId, key, id, false);
+      sound.pen();
+      $('#del-list', el).innerHTML = rows();
+      toast('Restored');
+    });
+  });
+}
+
+// Someone joined halfway through: which earlier bills were they part of?
+function sheetPastBills(partyId, personId) {
+  const party = store.party(partyId);
+  const person = party.members[personId];
+  const bills = live(party.expenses).filter(e => !(e.split.weights[personId] > 0)).sort((a, b) => b.date.localeCompare(a.date));
+  if (!bills.length) return;
+  openSheet(`
+    <div class="sheet-head"><h2>Add ${esc(person.name)} to past bills?</h2>${closeButton}</div>
+    <p class="muted">Tick the bills ${esc(person.name)} was part of. Their share comes out of everyone else’s.</p>
+    <div class="split-list">${bills.map(e => e.split.mode === 'equal'
+      ? `<label class="split-row"><input type="checkbox" class="tick" data-bill="${esc(e.id)}"><span class="grow"><b>${esc(e.title)}</b><small class="muted">${prettyDate(e.date)} · ${money(party, e.amount)} · split ${Object.keys(e.split.weights).length} ways</small></span></label>`
+      : `<div class="split-row off"><span class="grow"><b>${esc(e.title)}</b><small class="muted">Split by exact amounts. Edit this bill to include ${esc(person.name)}.</small></span></div>`).join('')}
+    </div>
+    <div class="sheet-actions">
+      <button class="btn ghost" data-act="close-sheet">Not now</button>
+      <button class="btn primary grow" id="pb-save">Add to ticked bills</button>
+    </div>
+  `, el => {
+    $('#pb-save', el).addEventListener('click', async () => {
+      const ids = [...el.querySelectorAll('[data-bill]:checked')].map(input => input.dataset.bill);
+      await closeSheet();
+      if (!ids.length) return;
+      store.update(db => {
+        for (const id of ids) {
+          const expense = db.parties[partyId].expenses[id];
+          expense.split.weights[personId] = 1;
+          expense.at = nextStamp(expense.at);
+        }
+      });
+      sound.pen();
+      toast(`Added ${person.name} to ${ids.length} bill${ids.length === 1 ? '' : 's'}`);
+    });
+  });
+}
+
 function sheetInstallHelp() {
   const steps = isIOS
     ? ['Open this page in <b>Safari</b>', 'Tap the <b>Share</b> button', 'Choose <b>Add to Home Screen</b>', 'Tap <b>Add</b>']
@@ -1295,12 +1486,26 @@ function sheetAppMenu() {
     <div class="sheet-head"><h2>Menu</h2>${closeButton}</div>
     <div class="menu">
       <button class="menu-item" id="m-paste">Open a shared ledger</button>
+      <button class="menu-item switch" id="m-sound" aria-pressed="${store.db.sound !== false}">Sounds<span>${store.db.sound !== false ? 'On' : 'Off'}</span></button>
+      <button class="menu-item switch" id="m-hand" aria-pressed="${store.db.handwriting !== false}">Handwritten entries<span>${store.db.handwriting !== false ? 'On' : 'Off'}</span></button>
+      <button class="menu-item" data-act="tips">Show the tips again</button>
       <button class="menu-item" id="m-backup">Back up all ledgers</button>
       <label class="menu-item">Restore from a backup file<input type="file" id="m-restore" accept="application/json,.json" hidden></label>
       ${isStandalone ? '' : '<button class="menu-item" id="m-install">Install the app</button>'}
     </div>
-    <p class="about">Hishab keeps your ledgers on this device. Nothing leaves it unless you share a link.</p>
+    <p class="about">${liveEnabled()
+      ? 'Your phone keeps its own copy of every ledger. Shared ledgers also live in your group’s free Firebase database so everyone stays in sync.'
+      : 'Hishab keeps your ledgers on this device. Nothing leaves it unless you share a link.'}</p>
   `, el => {
+    const toggle = (button, key, after) => {
+      store.update(db => { db[key] = db[key] === false; });
+      const on = store.db[key] !== false;
+      button.setAttribute('aria-pressed', on);
+      button.querySelector('span').textContent = on ? 'On' : 'Off';
+      after?.(on);
+    };
+    $('#m-sound', el).addEventListener('click', event => toggle(event.currentTarget, 'sound', on => on && sound.stamp()));
+    $('#m-hand', el).addEventListener('click', event => toggle(event.currentTarget, 'handwriting'));
     $('#m-paste', el).addEventListener('click', sheetPasteLink);
     $('#m-install', el)?.addEventListener('click', () => actions.install());
     $('#m-backup', el).addEventListener('click', () => {
@@ -1336,6 +1541,7 @@ const actions = {
   home: () => { location.hash = '/'; },
   'open-party': el => {
     const go = () => { location.hash = `/party/${el.dataset.id}`; };
+    sound.page();
     if (reducedMotion()) return go();
     el.classList.add('opening');
     haptic(10);
@@ -1343,9 +1549,13 @@ const actions = {
   },
   'new-party': () => sheetNewParty(),
   tab: el => {
+    if (el.dataset.tab !== route.tab) sound.page();
     history.replaceState(null, '', `#/party/${route.id}/${el.dataset.tab}`);
     render();
   },
+  pay: el => sheetPay(route.id, { from: el.dataset.from, to: el.dataset.to, amount: Number(el.dataset.amount) }),
+  deleted: () => sheetDeleted(route.id),
+  tips: () => sheetTips(),
   'add-expense': () => sheetExpense(route.id),
   'edit-expense': el => sheetExpense(route.id, el.dataset.id),
   members: () => sheetMembers(route.id),
@@ -1377,7 +1587,7 @@ const actions = {
     row.querySelectorAll('button').forEach(b => { b.disabled = true; });
     row.insertAdjacentHTML('beforeend', '<span class="stamp thump" aria-hidden="true">Paid</span>');
     row.classList.add('stamped');
-    setTimeout(() => haptic(35), 230);
+    setTimeout(() => { haptic(35); sound.stamp(); }, 230);
     setTimeout(commit, 800);
   },
   nudge: el => {
@@ -1445,6 +1655,7 @@ function applyTheme() {
   const root = document.documentElement;
   if (store.db.theme === 'auto') delete root.dataset.theme;
   else root.dataset.theme = store.db.theme;
+  root.classList.toggle('hand', store.db.handwriting !== false);
   $('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue('--cover-default').trim();
 }
 
@@ -1473,11 +1684,32 @@ store.subscribe(() => {
 
 applyTheme();
 render();
-handleJoinLink();
+handleJoinLink().then(opened => { if (!opened) maybeShowTips(); });
 startSync();
 
+// When a new version is published, the new service worker takes over and the
+// page offers a refresh, instead of quietly running the old code.
+function showUpdateBanner() {
+  if ($('.update-banner')) return;
+  const banner = document.createElement('div');
+  banner.className = 'update-banner';
+  banner.setAttribute('role', 'status');
+  banner.innerHTML = '<span>A new version of Hishab is ready.</span><button class="btn sm primary">Refresh</button>';
+  banner.querySelector('button').addEventListener('click', () => location.reload());
+  document.body.append(banner);
+  requestAnimationFrame(() => banner.classList.add('show'));
+}
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) showUpdateBanner(); });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then(registration => {
+      const check = () => registration.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+      setInterval(check, 30 * 60 * 1000);
+    }).catch(() => {});
+  });
 }
 // Ask the browser not to evict our data when the phone is low on space.
 navigator.storage?.persist?.().catch(() => {});

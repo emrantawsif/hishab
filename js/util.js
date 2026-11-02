@@ -34,6 +34,19 @@ export function prettyDate(iso) {
 
 export const pick = list => list[Math.floor(Math.random() * list.length)];
 
+// IBANs: stored without spaces, shown in groups of four, checked with the
+// standard mod-97 test so a typo is caught before anyone sends money.
+export const cleanIban = text => String(text ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 34);
+export const formatIban = iban => (iban || '').replace(/(.{4})(?=.)/g, '$1 ');
+
+export function ibanValid(iban) {
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) return false;
+  const digits = (iban.slice(4) + iban.slice(0, 4)).replace(/[A-Z]/g, ch => String(ch.charCodeAt(0) - 55));
+  let rest = 0;
+  for (const digit of digits) rest = (rest * 10 + Number(digit)) % 97;
+  return rest === 1;
+}
+
 export function haptic(ms = 12) {
   try { navigator.vibrate?.(ms); } catch { /* not supported */ }
 }

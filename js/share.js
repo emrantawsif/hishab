@@ -2,7 +2,7 @@
 // send that part to the server, so GitHub Pages never sees anyone's data.
 
 import { currency, formatMoney } from './money.js';
-import { live } from './util.js';
+import { formatIban, live } from './util.js';
 
 function toBase64Url(bytes) {
   let binary = '';
@@ -88,6 +88,11 @@ export function summaryText(party, stats, plan, link) {
     );
     if (plan.length) {
       lines.push(`*Who pays whom* (${symbol})`, '```' + table(plan.map(t => [`${shortName(nameOf(party, t.from))} → ${shortName(nameOf(party, t.to))}`, figure(t.amount)])) + '```');
+      const payees = [...new Set(plan.map(t => t.to))].map(id => party.members[id]).filter(m => m?.iban);
+      if (payees.length) {
+        lines.push('', '*Pay to*');
+        for (const payee of payees) lines.push(`${payee.holder || payee.name}: ${formatIban(payee.iban)}`);
+      }
     } else {
       lines.push('*Everyone is settled up.*');
     }
@@ -108,5 +113,7 @@ export function entryText(party, expense, link) {
 }
 
 export function nudgeText(party, transfer) {
-  return `Hi ${nameOf(party, transfer.from)}, quick reminder from *${party.name}*: you owe ${nameOf(party, transfer.to)} ${formatMoney(transfer.amount, party.currency)}.`;
+  const payee = party.members[transfer.to];
+  const bank = payee?.iban ? `\nIBAN: ${formatIban(payee.iban)} (${payee.holder || payee.name})` : '';
+  return `Hi ${nameOf(party, transfer.from)}, quick reminder from *${party.name}*: you owe ${nameOf(party, transfer.to)} ${formatMoney(transfer.amount, party.currency)}.${bank}`;
 }
