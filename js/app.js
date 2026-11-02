@@ -5,7 +5,7 @@ import { $, esc, live, uid, todayISO, prettyDate, haptic, cleanIban, formatIban,
 import { store, COVERS, initials, makeParty, nextStamp, mergeParty, sanitizeParty, parseNames, memberInUse, lastActivity, crewList, makePerson, memberFromPerson, savePerson, adoptMembers } from './state.js';
 import { INKS, PARTS, COLOR_PARTS, avatarSvg, avatarFromSeed, shuffleAvatar } from './avatar.js';
 import { sound } from './sound.js';
-import { CURRENCIES, currency, formatMoney, evaluateAmount, hasOperator, partyStats, settlePlan, expenseShares, ledgerShares } from './money.js';
+import { CURRENCIES, MAX_AMOUNT, currency, formatMoney, evaluateAmount, hasOperator, partyStats, settlePlan, expenseShares, ledgerShares } from './money.js';
 import { decodeParty, partyLink, extractJoinCode, summaryText, entryText, nudgeText } from './share.js';
 import { liveEnabled, liveLink, extractLiveId, fetchLedger, watch, unwatch, refreshAll, startSync, schedulePush, liveStatus, onStatus } from './sync.js';
 
@@ -814,6 +814,7 @@ function sheetExpense(partyId, expenseId = null) {
     const amount = evaluateAmount(draft.amountText);
     const errors = [];
     if (!(amount > 0)) errors.push('Enter how much it cost.');
+    else if (amount > MAX_AMOUNT) errors.push('That’s more than 1,000,000. Split it into smaller bills.');
     const paidBy = {};
     if (draft.payMode === 'single') {
       paidBy[draft.payer] = amount || 0;
@@ -1236,6 +1237,7 @@ function sheetRecordPayment(partyId) {
       const error = $('#rp-error', el);
       if (from === to) { error.textContent = 'Pick two different people.'; return shake($('#rp-to', el)); }
       if (!(amount > 0)) { error.textContent = 'Enter an amount.'; return shake($('#rp-amount', el)); }
+      if (amount > MAX_AMOUNT) { error.textContent = 'That’s more than 1,000,000. Record it in parts.'; return shake($('#rp-amount', el)); }
       recordPayment(partyId, from, to, amount);
       await closeSheet();
     });

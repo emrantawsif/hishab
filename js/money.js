@@ -21,6 +21,10 @@ export const CURRENCIES = {
 
 export const currency = code => CURRENCIES[code] || CURRENCIES.EUR;
 
+// The live database refuses single amounts above 1,000,000 (see the rules in
+// the README), so the app stops them before they're saved.
+export const MAX_AMOUNT = 100000000;
+
 // First-run guess from the phone's time zone; the group can change it per ledger.
 export function defaultCurrency() {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
