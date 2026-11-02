@@ -700,6 +700,7 @@ select.input option { background: var(--sheet); color: var(--ink); }
   color: var(--ink);
   font: 500 44px/1.15 var(--mono);
   text-align: right;
+  caret-color: var(--cover-default);
   outline: none;
   font-variant-numeric: tabular-nums;
 }
